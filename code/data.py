@@ -85,7 +85,7 @@ class Data:
         self._line_notch()
         self._lomb_scargle(index)
 
-        # remove some motor noise 
+        # remove some motor noise
         self._motor_noise_removal()
 
     def _load_unsupervised(self):
@@ -205,6 +205,29 @@ class Data:
         pgram = lombscargle(steps, wave[:, 0], freqs)
         plt.figure()
         plt.plot(freqs, np.sqrt(4 * (pgram / wave_len)), "b")
+
+    def _motor_noise_removal(self):
+        for j, channel in enumerate(self.channels):
+            # center mean around zero
+            channel = channel - np.mean(channel, axis=0)
+
+            # cast outliers to zero
+            stdev = np.std(channel, dtype="float64", axis=0)
+            mask = np.abs(channel) - 3*stdev
+            mask[mask > 0] = 0.0
+            mask[mask < 0] = 1.0
+            channel = mask * channel
+
+            # smooth drop-off of signals
+            # this induces artificial peaks/drops in the data, need improved method
+            for i in range(channel.shape[1]):
+                for k in range(len(channel[:, i]) - 1):
+                    if channel[k, i] - channel[k+1, i] > stdev / 10.0:
+                     channel[k+1, i] = channel[k, i] - stdev / 10.0
+                    elif channel[k, i] - channel[k + 1, i] < - stdev / 10.0:
+                     channel[k + 1, i] = channel[k, i] + stdev / 10.0
+
+            self.channels[j] = channel
 
     @staticmethod
     def _random_signal_loader(static_indices, shuffled_non_static_indices, file_path):
