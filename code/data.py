@@ -253,9 +253,10 @@ class Data:
 
             self.channels[j] = channel
 
-    def _visualize_range(self, wave, mean, stdev, start, end):
+    @staticmethod
+    def _visualize_range(wave, mean, stdev, start, end):
         xrange = len(wave[start:end])
-        plt.figure(figsize=[18, 8])
+        plt.figure(figsize=[28, 8])
         plt.plot([0, xrange], [mean, mean], 'b')
         plt.plot([0, xrange], [mean + stdev, mean + stdev], 'g')
         plt.plot([0, xrange], [mean - stdev, mean - stdev], 'g')
@@ -264,6 +265,7 @@ class Data:
         plt.plot([0, xrange], [mean + 3 * stdev, mean + 3 * stdev], 'g')
         plt.plot([0, xrange], [mean - 3 * stdev, mean - 3 * stdev], 'g')
         plt.plot(wave[start:end], 'r')
+        plt.show()
 
     @staticmethod
     def _random_signal_loader(static_indices, shuffled_non_static_indices, file_path):
