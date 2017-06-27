@@ -79,30 +79,48 @@ class Data:
         """Basic, automatic data preprocessing"""
 
         # apply a notch filter and high pass filter to the data, plot the frequency of a random plot as test
+        print("commence filtering...")
         index = rand.randint(0, len(self.dataset) - 1)
         self._lomb_scargle(index)
+        print("apply high pass filter...")
         self._high_pass()
+        print("apply line noise filter...")
         self._line_notch()
         self._lomb_scargle(index)
+        print("filtering complete")
 
         # remove some motor noise
+        print("removing motor noise...")
+        channel = self.channels[index][:, 0]
+        start = 0
+        end = len(channel)
+        self._visualize_range(channel, np.mean(channel), np.std(channel), start, end)
         self._motor_noise_removal()
+        channel = self.channels[index][:, 0]
+        self._visualize_range(channel, np.mean(channel), np.std(channel), start, end)
+        self._lomb_scargle(index)
+        print("motor noise removal complete")
 
     def _load_unsupervised(self):
         dataset = []
         names = []
 
         # first load files taken with the epoc
+        print("loading old data")
         for file in os.listdir(self.uns_path + "old\\"):
             if file.endswith(".CSV"):
                 names.append(file)
                 data = pd.read_csv(self.uns_path + "old\\" + file)
-                print(data.shape)
                 dataset.append(data)
 
         # then load files taken with the epoc+ (different format)
-        for i, file in enumerate(os.listdir(self.uns_path)):
-            if file.endswith(".md.CSV"):
+        db1 = 0
+        db2 = 0
+        i = -1
+        print("loading new data")
+        for file in os.listdir(self.uns_path):
+            if file.endswith(".md.csv"):
+                i += 1
                 db2 = pd.read_csv(self.uns_path + file, skiprows=[0])
                 header = {}
                 f = open(self.uns_path + file, 'r')
@@ -112,7 +130,8 @@ class Data:
                 f.close()
                 db2.columns = header['labels']
                 db2.TIME_STAMP_ms += db2.TIME_STAMP_s * 1000
-            elif file.endswith(".CSV"):
+            elif file.endswith(".csv"):
+                i += 1
                 names.append(file)
                 db1 = pd.read_csv(self.uns_path + file, skiprows=[0])
                 header = {}
@@ -133,8 +152,12 @@ class Data:
         self.names = names
         self.dataset = dataset
         self.channels = []
+        print(len(dataset))
         for data in self.dataset:
-            self.channels.append(data.loc[:, 'AF3':'AF4'].values)
+            try:
+                self.channels.append(data.loc[:, ' AF3':' AF4'].values)
+            except KeyError:
+                self.channels.append(data.loc[:, 'AF3':'AF4'].values)
         self.new_header = header
 
     def _load_supervised(self):
@@ -198,13 +221,14 @@ class Data:
 
     def _lomb_scargle(self, index):
         """Produce a simple lomb scargle frequency density plot"""
-        wave = self.channels[index]
+        wave = self.channels[index] - np.mean(self.channels[index])
         wave_len = wave.shape[0]
         steps = np.linspace(0.0, wave_len / self.sampl_rate, wave_len)
         freqs = np.linspace(0.01, 70.0, 140)
         pgram = lombscargle(steps, wave[:, 0], freqs)
         plt.figure()
         plt.plot(freqs, np.sqrt(4 * (pgram / wave_len)), "b")
+        plt.show()
 
     def _motor_noise_removal(self):
         for j, channel in enumerate(self.channels):
@@ -222,12 +246,24 @@ class Data:
             # this induces artificial peaks/drops in the data, need improved method
             for i in range(channel.shape[1]):
                 for k in range(len(channel[:, i]) - 1):
-                    if channel[k, i] - channel[k+1, i] > stdev / 10.0:
-                     channel[k+1, i] = channel[k, i] - stdev / 10.0
-                    elif channel[k, i] - channel[k + 1, i] < - stdev / 10.0:
-                     channel[k + 1, i] = channel[k, i] + stdev / 10.0
+                    if (channel[k, i] - channel[k+1, i]) > stdev[i] / 10.0:
+                        channel[k+1, i] = channel[k, i] - stdev[i] / 10.0
+                    elif (channel[k, i] - channel[k + 1, i]) < - stdev[i] / 10.0:
+                        channel[k + 1, i] = channel[k, i] + stdev[i] / 10.0
 
             self.channels[j] = channel
+
+    def _visualize_range(self, wave, mean, stdev, start, end):
+        xrange = len(wave[start:end])
+        plt.figure(figsize=[18, 8])
+        plt.plot([0, xrange], [mean, mean], 'b')
+        plt.plot([0, xrange], [mean + stdev, mean + stdev], 'g')
+        plt.plot([0, xrange], [mean - stdev, mean - stdev], 'g')
+        plt.plot([0, xrange], [mean + 2 * stdev, mean + 2 * stdev], 'g')
+        plt.plot([0, xrange], [mean - 2 * stdev, mean - 2 * stdev], 'g')
+        plt.plot([0, xrange], [mean + 3 * stdev, mean + 3 * stdev], 'g')
+        plt.plot([0, xrange], [mean - 3 * stdev, mean - 3 * stdev], 'g')
+        plt.plot(wave[start:end], 'r')
 
     @staticmethod
     def _random_signal_loader(static_indices, shuffled_non_static_indices, file_path):
