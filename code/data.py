@@ -8,12 +8,10 @@ import random as rand
 import matplotlib.pyplot as plt
 from mne.viz import plot_topomap
 from sklearn.decomposition import FastICA
-import time
-from IPython.display import clear_output
 
 
 class Data:
-    """Class for handling various types of EEG data"""
+    """Class for handling and pre processing various types of EEG data"""
 
     def __init__(self, type,
                  load_pkl=False, preprocess=True,
@@ -22,6 +20,7 @@ class Data:
                  sup_path = globals.SUPER_PATH, uns_path=globals.UNSUP_PATH, fak_path=globals.FAKE_PATH):
 
         self.type = type
+        self.preprocess = preprocess
 
         # data folder paths
         self.sup_path = sup_path
@@ -48,13 +47,17 @@ class Data:
         if load_pkl:
             # this class can be used to load data from a pickle frame
             self._load_pkl()
-            if preprocess:
+            if self.preprocess:
                 self._preprocess()
+            else:
+                self.channels_interpolated = np.copy(self.channels)
         else:
             # standard usage, load the data from csv files in a folder and apply simple pre-processing
             self._load()
-            if preprocess:
+            if self.preprocess:
                 self._preprocess()
+            else:
+                self.channels_interpolated = np.copy(self.channels)
 
     def get_dataset(self, name):
         """Return a dataset by filename, ending with the csv tag"""
@@ -134,13 +137,16 @@ class Data:
         dataset = []
         names = []
 
-        # first load files taken with the epoc
+        # first load files taken with the epoc (if exists)
         print("loading old data")
-        for file in os.listdir(self.uns_path + "old\\"):
-            if file.endswith(".CSV"):
-                names.append(file)
-                data = pd.read_csv(self.uns_path + "old\\" + file)
-                dataset.append(data)
+        try:
+            for file in os.listdir(self.uns_path + "old\\"):
+                if file.endswith(".CSV"):
+                    names.append(file)
+                    data = pd.read_csv(self.uns_path + "old\\" + file)
+                    dataset.append(data)
+        except FileNotFoundError:
+            print("No epoc files, or files in wrong folder (make sure the folder is old, within current data path)")
 
         # then load files taken with the epoc+ (different format)
         db1 = 0
@@ -224,8 +230,6 @@ class Data:
                 gyroy = np.asarray(dat["GYROY_md"])
                 gyroz = np.asarray(dat["GYROZ"])
                 gyro = np.abs(gyrox - np.mean(gyrox)) + np.abs(gyroy - np.mean(gyroy)) + np.abs(gyroz - np.mean(gyroz))
-
-                print(gyrox[0], gyroz[0], gyroy[0], gyro[0])
             except KeyError:
                 # old data (epoc)
                 gyrox = dat.loc[:, " GYROX"].values
@@ -233,7 +237,7 @@ class Data:
                 gyro = np.abs(gyrox - np.mean(gyrox)) + np.abs(gyroy - np.mean(gyroy))
 
             self.gyro.append(gyro)
-        print("done with gyro stuff")
+        print("gyro data collection complete")
 
     def _line_notch(self):
         """notch filter at specified frequency hz (standard = 50)"""
@@ -276,7 +280,7 @@ class Data:
         steps = np.linspace(0.0, wave_len / self.sampl_rate, wave_len)
         freqs = np.linspace(0.01, 70.0, 140)
         pgram = lombscargle(steps, wave, freqs)
-        plt.figure(figsize=[15,8])
+        plt.figure(figsize=[15, 8])
         plt.plot(freqs, np.sqrt(4 * (pgram / wave_len)), "b")
         # plt.show()
 
@@ -339,14 +343,12 @@ class Data:
             S = ica.fit_transform(channel)  # Reconstruct signals
             A = ica.mixing_
 
-            # get informative plots
-
             # lomb scargle prelims
             normval = S.shape[0]
             steps = np.linspace(0.0, normval / self.sampl_rate, normval)
             freqs = np.linspace(0.01, 70.0, 140)
 
-            # plot for every IC separately, reject components based on plots
+            # plot for every IC separately, reject components based on informative plots
             for i in range(channel.shape[1]):
                 # lomb scargle frequency plot
                 plt.figure(figsize=[15, 8])
@@ -355,7 +357,7 @@ class Data:
                 plt.plot(freqs, np.sqrt(4 * (pgram / normval)), "r")
                 plt.pause(0.0001)
 
-                # plot of S over a small range
+                # plot of S over a small range, twice
                 plt.figure(figsize=[18, 8])
                 plt.title("small section of activity of independent component: " + str(i))
                 plt.plot(S[20000:21000, i])
@@ -364,15 +366,15 @@ class Data:
                 plt.title("small section of activity of channels")
                 plt.plot(channel[20000:21000])
 
-                # plt.figure(figsize=[18, 8])
-                # plt.title("small section of activity 2 of independent component: " + str(i))
-                # plt.plot(S[40000:41000, i])
-                # plt.pause(0.0001)
-                #
-                # plt.figure(figsize=[18, 8])
-                # plt.title("small section of activity 2 of channels")
-                # plt.plot(S[40000:41000, i])
-                # plt.pause(0.0001)
+                plt.figure(figsize=[18, 8])
+                plt.title("small section of activity 2 of independent component: " + str(i))
+                plt.plot(S[40000:41000, i])
+                plt.pause(0.0001)
+
+                plt.figure(figsize=[18, 8])
+                plt.title("small section of activity 2 of channels")
+                plt.plot(S[40000:41000, i])
+                plt.pause(0.0001)
 
                 plt.draw_all()
 
@@ -393,18 +395,14 @@ class Data:
                     else:
                         print("invalid input...")
 
-                # plt.show(block=True)
-                # plt.close("all")
-
+            # replace the channels with ICA corrected data, and plot the effect of the correction
             self.channels[j] = (np.dot(A, S.T)).T
             plt.figure(figsize=[18, 8])
             plt.title("small section of activity of channels, after ica")
             plt.plot(self.channels[j][20000:21000])
             plt.show()
 
-            consumed = 0
-            prevchunck = 0
-
+            # replace non-interpolated parts of the interpolated channels with ICA corrected data
             self.channels_interpolated[j][self.mask[j] > 0] = self.channels[j]
 
     @staticmethod
@@ -428,22 +426,53 @@ class Data:
         j = 0
         for k, data in enumerate(self.dataset):
             try:
+                # prepare new (epoc+) data for storage
                 check = data["GYROX_md"]
                 data.loc[:,"AF3":"AF4"] = self.channels_interpolated[k]
-                data['mask'] = self.mask[k]
+                if self.preprocess:
+                    data['mask'] = self.mask[k]
+
+                # append to csv file
                 if i == 0:
                     data.to_csv(f_new, index=False)
                 else:
                     data.to_csv(f_new, index=False, header=False)
                 i += 1
             except KeyError:
+                # prepare old (epoc) data for storage
                 data.loc[:," AF3":" AF4"] = self.channels_interpolated[k]
-                data['mask'] = self.mask[k]
+                if self.preprocess:
+                    data['mask'] = self.mask[k]
+
+                # append to csv file
                 if j == 0:
                     data.to_csv(f_old, index=False)
                 else:
                     data.to_csv(f_old, index=False, header=False)
                 j += 1
+
+    def save_csv_separate(self, folder, tag):
+        for k, data in enumerate(self.dataset):
+            try:
+                # stupid, checks if this a new file (epoc+)
+                check = data["GYROX_md"]
+
+                # replace channels with (potentially preprocessed)
+                data.loc[:, "AF3":"AF4"] = self.channels_interpolated[k]
+                if self.preprocess:
+                    data['mask'] = self.mask[k]
+
+                # store new file separate csv file
+                f_new = open(folder + self.names[k][:-4] + tag + self.names[k][-4:], "w")
+                data.to_csv(f_new, index=False)
+            except KeyError:
+                # otherwise handle as old file (epoc)
+                data.loc[:, " AF3":" AF4"] = self.channels_interpolated[k]
+                if self.preprocess:
+                    data['mask'] = self.mask[k]
+
+                f_old = open(folder + self.names[k][:-4] + tag + self.names[k][-4:], "w")
+                data.to_csv(f_old, index=False)
 
     @staticmethod
     def _random_signal_loader(static_indices, shuffled_non_static_indices, file_path):

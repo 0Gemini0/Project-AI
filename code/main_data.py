@@ -1,4 +1,4 @@
 from data import Data
 
-test = Data("unsupervised")
-test.save_csv("preprocessed_old.csv", "preprocessed_new.csv")
+test = Data("unsupervised", preprocess=False)
+test.save_csv_separate("test\\", "_test")
